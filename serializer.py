@@ -1,8 +1,6 @@
 from typing import Iterable
 
-from pydantic import BaseModel
-from sqlalchemy import Column
-from sqlalchemy.exc import InvalidRequestError
+from pydantic import create_model
 
 __all__ = ("Serializer",)
 
@@ -60,25 +58,26 @@ class Serializer:
             elif attr not in cls.__dict__.keys():
                 raise AttributeError(f"Table {cls.__tablename__} doesn't have field {attr}")
 
-    class _ModelSerializer(BaseModel):
-        pass
+    def _get_model(self, cls):
+        fields = {}
+        table = cls.metadata.tables[cls.__tablename__]
+        for column in table.columns:
+            name = column.name
+            if any((
+                    self.include_fields == ALL and name not in self.exclude_fields,
+                    self.exclude_fields == EMPTY and name in self.include_fields
+            )):
+                if column.default is None:
+                    default = ...
+                else:
+                    default = column.default.arg
+                fields[name] = (column.type.python_type, default)
 
-    def _get_serializer(self, cls):
-        serializer = self._ModelSerializer()
-
-        annotations = {}
-        for name, value in cls.__dict__.items():
-            try:
-                if hasattr(value, "expression") and isinstance(value.expression, Column):
-                    if any((
-                            self.include_fields == ALL and name not in self.exclude_fields,
-                            self.exclude_fields == EMPTY and name in self.include_fields
-                    )):
-                        annotations[name] = value.expression.type.python_type
-            except InvalidRequestError:
-                pass
-
-        return serializer
+        model = create_model(
+            "ModelSerializer",
+            **fields
+        )
+        return model
 
     def add(self, cls):
         """
@@ -97,4 +96,4 @@ class Serializer:
         :return: Pydantic model (BaseModel)
         """
         self._check_fields(cls)
-        return self._get_serializer(cls)
+        return self._get_model(cls)
